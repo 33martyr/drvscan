@@ -13,7 +13,10 @@ namespace drvscan {
 
 Verdict OverallVerdict(const std::vector<DriverReport>& reports) {
     Verdict v = Verdict::Clean;
-    for (auto& r : reports) v = MaxVerdict(v, r.overall);
+    for (auto& r : reports) {
+        if (r.overall == Verdict::Unmapped) continue;
+        v = MaxVerdict(v, r.overall);
+    }
     return v;
 }
 
@@ -32,13 +35,21 @@ static std::string RedactUsername(const std::string& path, bool doRedact) {
 }
 
 static const char* SourceLabel(DriverSource s) {
-    return s == DriverSource::Orphaned ? "orphaned" : "memory";
+    switch (s) {
+        case DriverSource::Orphaned: return "orphaned";
+        case DriverSource::OnDisk: return "on-disk";
+        default: return "memory";
+    }
 }
 
 void PrintTable(const std::vector<DriverReport>& reports, FILE* out, bool verbose) {
     fprintf(out, "%-18s %-8s %-11s %-8s %-9s %-30s %s\n", "Base", "Size", "Verdict", "Conf", "Source", "File", "Evidence");
     fprintf(out, "%-18s %-8s %-11s %-8s %-9s %-30s %s\n", "------------------", "--------", "-----------", "--------", "---------", "------------------------------", "--------");
+    // Unmapped rows are hidden by default (like Clean) — "cannot audit" is not a finding.
+    int hiddenUnmapped = 0;
+    for (auto& r : reports) if (r.overall == Verdict::Unmapped) ++hiddenUnmapped;
     for (auto& r : reports) {
+        if (r.overall == Verdict::Unmapped && !verbose) continue;
         std::string evStr;
         if (r.evidence.empty()) {
             evStr = "-";
@@ -52,35 +63,54 @@ void PrintTable(const std::vector<DriverReport>& reports, FILE* out, bool verbos
                 if (!e.provenance.empty()) evStr += " [" + e.provenance + "]";
                 evStr += ")";
             }
-            if (evStr.empty()) evStr = "(all checks clean; --verbose to show)";
+            if (evStr.empty()) {
+                if (r.overall == Verdict::Unmapped) {
+                    bool dup = false;
+                    for (auto& e : r.evidence) if (e.verdict == Verdict::Unmapped) { evStr = e.detail; dup = true; break; }
+                    if (!dup) evStr = "(unmapped — cannot audit)";
+                } else evStr = "(all checks clean; --verbose to show)";
+            }
         }
         std::string fn = r.driver.fileName;
         if (fn.size() > 30) fn = fn.substr(0, 27) + "...";
+        const char* verdictStr = (r.overall == Verdict::Unmapped) ? "unmapped" : ToString(r.overall);
+        const char* confStr = (r.overall == Verdict::Unmapped) ? "-" : ToString(r.overallConfidence);
         fprintf(out, "%-18s %-8u %-11s %-8s %-9s %-30s %s\n",
                 r.driver.baseHex.c_str(),
                 r.driver.kernelImageSize,
-                ToString(r.overall),
-                ToString(r.overallConfidence),
+                verdictStr,
+                confStr,
                 SourceLabel(r.driver.source),
                 fn.c_str(),
                 evStr.c_str());
-        if (!r.summary.empty() && r.overall != Verdict::Clean) {
+        if (!r.summary.empty() && r.overall != Verdict::Clean && r.overall != Verdict::Unmapped) {
             fprintf(out, "  -> %s\n", r.summary.c_str());
             if (!r.nextStep.empty()) fprintf(out, "     next: %s\n", r.nextStep.c_str());
         }
     }
-    int clean = 0, warn = 0, susp = 0, cntOrphaned = 0, cntMemory = 0;
+    if (!verbose && hiddenUnmapped > 0) {
+        fprintf(out, "  (%d unmapped device(s) hidden — use --verbose to show, cannot audit without file path)\n", hiddenUnmapped);
+    }
+    int clean = 0, warn = 0, susp = 0, unmapped = 0, cntOrphaned = 0, cntMemory = 0, cntOnDisk = 0;
     for (auto& r : reports) {
-        if (r.overall == Verdict::Clean) ++clean;
+        if (r.overall == Verdict::Unmapped) ++unmapped;
+        else if (r.overall == Verdict::Clean) ++clean;
         else if (r.overall == Verdict::Warn) ++warn;
         else ++susp;
         if (r.driver.source == DriverSource::Orphaned) ++cntOrphaned;
+        else if (r.driver.source == DriverSource::OnDisk) ++cntOnDisk;
         else ++cntMemory;
     }
-    fprintf(out, "\n%d drivers (%d memory, %d orphaned): %d clean, %d warn, %d suspicious\n",
-            (int)reports.size(), cntMemory, cntOrphaned, clean, warn, susp);
+    if (cntOnDisk > 0 || cntOrphaned > 0) {
+        fprintf(out, "\n%d drivers (%d memory, %d on-disk, %d orphaned): %d clean, %d warn, %d suspicious · %d unmapped\n",
+                (int)reports.size(), cntMemory, cntOnDisk, cntOrphaned, clean, warn, susp, unmapped);
+    } else {
+        fprintf(out, "\n%d drivers: %d clean, %d warn, %d suspicious · %d unmapped\n",
+                (int)reports.size(), clean, warn, susp, unmapped);
+    }
     if (susp > 0) fprintf(out, "Note: 'suspicious' is not 'malicious' — see LIMITATIONS.md and per-finding confidence.\n");
     if (cntOrphaned > 0) fprintf(out, "Note: Source=orphaned means a \\Driver\\ object with no PsLoadedModuleList entry (possible manual map / legacy object).\n");
+    if (cntOnDisk > 0) fprintf(out, "Note: Source=on-disk means driver not in PsLoadedModuleList; verdict is against the file on disk, not the loaded image.\n");
 }
 
 void PrintTable(const std::vector<DriverReport>& reports, FILE* out) {
@@ -109,9 +139,10 @@ void PrintJson(const std::vector<DriverReport>& reports, const Blocklist* blockl
         j["blocklist_schema_version"] = blocklist->schemaVersion().empty() ? blocklistSchemaVersion : blocklist->schemaVersion();
         j["blocklist_sources"] = blocklist->sources();
     }
-    int clean = 0, warn = 0, susp = 0;
+    int clean = 0, warn = 0, susp = 0, unmapped = 0;
     for (auto& r : reports) {
-        if (r.overall == Verdict::Clean) ++clean;
+        if (r.overall == Verdict::Unmapped) ++unmapped;
+        else if (r.overall == Verdict::Clean) ++clean;
         else if (r.overall == Verdict::Warn) ++warn;
         else ++susp;
     }
@@ -120,6 +151,7 @@ void PrintJson(const std::vector<DriverReport>& reports, const Blocklist* blockl
         summ["clean"] = clean;
         summ["warn"] = warn;
         summ["suspicious"] = susp;
+        summ["unmapped"] = unmapped;
         j["summary"] = summ;
     }
     j["disclaimer"] = std::string("suspicious is not malicious; see LIMITATIONS.md; valid signature does not imply safe; cert hits are signals not proof of compromise");
@@ -132,8 +164,20 @@ void PrintJson(const std::vector<DriverReport>& reports, const Blocklist* blockl
         o["normalizedPath"] = redactPaths ? RedactUsername(r.driver.normalizedPath, true) : r.driver.normalizedPath;
         o["fileName"] = r.driver.fileName;
         o["source"] = SourceLabel(r.driver.source);
+        if (r.overall == Verdict::Unmapped) {
+            o["status"] = "unmapped";
+            std::string reason;
+            for (auto& e : r.evidence) if (e.verdict == Verdict::Unmapped) { reason = e.detail; break; }
+            if (reason.empty()) {
+                if (r.driver.fileName == "<unknown>") reason = "device not in device_map";
+                else reason = "mapped driver not in loaded module list";
+            }
+            o["reason"] = reason;
+        } else {
+            o["status"] = ToString(r.overall);
+        }
         o["verdict"] = ToString(r.overall);
-        o["confidence"] = ToString(r.overallConfidence);
+        o["confidence"] = (r.overall == Verdict::Unmapped) ? "n/a" : ToString(r.overallConfidence);
         o["summary"] = r.summary;
         o["next_step"] = r.nextStep;
         nlohmann::json checks = nlohmann::json::array();
@@ -170,17 +214,26 @@ void PrintPidTable(FILE* out, const std::string& procLabel, DWORD pid, const std
     if (handles.empty()) { fprintf(out, "(no device handles)\n\n"); return; }
     fprintf(out, "%-27s %-18s %-8s %-11s %-8s %-9s %s\n", "Device", "Base", "Size", "Verdict", "Conf", "Source", "File");
     fprintf(out, "%-27s %-18s %-8s %-11s %-8s %-9s %s\n", "---------------------------", "------------------", "--------", "-----------", "--------", "---------", "----------------");
+    int pidHiddenUnmapped = 0;
+    for (auto& r : reports) if (r.overall == Verdict::Unmapped && !verbose) ++pidHiddenUnmapped;
     for (size_t i=0;i<reports.size();++i){
         const auto& r = reports[i];
+        if (r.overall == Verdict::Unmapped && !verbose) continue;
         std::string dev = (i<handles.size()) ? handles[i].device_path : "";
         if(dev.size()>27) dev=dev.substr(0,24)+"...";
         std::string fn=r.driver.fileName; if(fn.size()>22) fn=fn.substr(0,19)+"...";
         std::string ev;
         if(r.evidence.empty()) ev="-";
-        else { bool first=true; for(auto& e:r.evidence){ if(!verbose && e.verdict==Verdict::Clean) continue; if(!first) ev+=" | "; first=false; ev+=e.check+":"+ToString(e.verdict)+"("+e.detail+")"; } if(ev.empty()) ev="(clean)"; }
-        fprintf(out, "%-27s %-18s %-8u %-11s %-8s %-9s %s\n", dev.c_str(), r.driver.baseHex.c_str(), r.driver.kernelImageSize, ToString(r.overall), ToString(r.overallConfidence), SourceLabel(r.driver.source), fn.c_str());
-        if(!ev.empty() && ev!="(clean)") fprintf(out, "  %s\n", ev.c_str());
-        if(!r.nextStep.empty() && r.overall!=Verdict::Clean) fprintf(out, "  next: %s\n", r.nextStep.c_str());
+        else { bool first=true; for(auto& e:r.evidence){ if(!verbose && e.verdict==Verdict::Clean) continue; if(!first) ev+=" | "; first=false; ev+=e.check+":"+ToString(e.verdict)+"("+e.detail+")"; } if(ev.empty()) { if(r.overall==Verdict::Unmapped){ for(auto& e:r.evidence) if(e.verdict==Verdict::Unmapped){ ev=e.detail; break;} if(ev.empty()) ev="(unmapped)"; } else ev="(clean)"; } }
+        const char* pidVerdict = (r.overall == Verdict::Unmapped) ? "unmapped" : ToString(r.overall);
+        const char* pidConf = (r.overall == Verdict::Unmapped) ? "-" : ToString(r.overallConfidence);
+        fprintf(out, "%-27s %-18s %-8u %-11s %-8s %-9s %s\n", dev.c_str(), r.driver.baseHex.c_str(), r.driver.kernelImageSize, pidVerdict, pidConf, SourceLabel(r.driver.source), fn.c_str());
+        if(!ev.empty() && ev!="(clean)" && ev!="(unmapped)") fprintf(out, "  %s\n", ev.c_str());
+        else if(r.overall==Verdict::Unmapped && !ev.empty()) fprintf(out, "  %s\n", ev.c_str());
+        if(!r.nextStep.empty() && r.overall!=Verdict::Clean && r.overall!=Verdict::Unmapped) fprintf(out, "  next: %s\n", r.nextStep.c_str());
+    }
+    if (pidHiddenUnmapped > 0 && !verbose) {
+        fprintf(out, "  (%d unmapped device(s) hidden — use --verbose to show)\n", pidHiddenUnmapped);
     }
     if(reports.size() < handles.size()){
         for(size_t i=reports.size(); i<handles.size(); ++i){
@@ -210,7 +263,15 @@ int WritePidJson(FILE* out, const Blocklist* blocklist, bool redactPaths, const 
         for(const auto& r: reports){
             nlohmann::json o; o["base"]=r.driver.baseHex; o["imageSize"]=r.driver.kernelImageSize;
             o["kernelPath"]=redactPaths?RedactUsername(r.driver.kernelPath,true):r.driver.kernelPath;
-            o["fileName"]=r.driver.fileName; o["source"]=SourceLabel(r.driver.source); o["verdict"]=ToString(r.overall); o["confidence"]=ToString(r.overallConfidence);
+            o["fileName"]=r.driver.fileName; o["source"]=SourceLabel(r.driver.source);
+            if (r.overall == Verdict::Unmapped) {
+                o["status"]="unmapped";
+                std::string reason;
+                for(auto& e: r.evidence) if(e.verdict==Verdict::Unmapped){ reason=e.detail; break; }
+                if(reason.empty()) reason = (r.driver.fileName=="<unknown>")? "device not in device_map" : "mapped driver not in loaded module list";
+                o["reason"]=reason;
+            } else o["status"]=ToString(r.overall);
+            o["verdict"]=ToString(r.overall); o["confidence"]=(r.overall==Verdict::Unmapped)?"n/a":ToString(r.overallConfidence);
             o["summary"]=r.summary; o["next_step"]=r.nextStep;
             nlohmann::json chs=nlohmann::json::array();
             for(const auto& e:r.evidence){ nlohmann::json c; c["check"]=e.check; c["verdict"]=ToString(e.verdict); c["confidence"]=ToString(e.confidence);
@@ -227,7 +288,8 @@ int WritePidJson(FILE* out, const Blocklist* blocklist, bool redactPaths, const 
             o["devices"]=darr;
             reps.push_back(o);
             uniqDrivers[r.driver.fileName]++;
-            if(r.overall==Verdict::Clean) clean++; else if(r.overall==Verdict::Warn) warn++; else susp++;
+            if(r.overall==Verdict::Unmapped) { /* not counted in clean/warn/susp */ }
+            else if(r.overall==Verdict::Clean) clean++; else if(r.overall==Verdict::Warn) warn++; else susp++;
         }
         entry["drivers"]=reps;
         arr.push_back(entry);
@@ -235,7 +297,7 @@ int WritePidJson(FILE* out, const Blocklist* blocklist, bool redactPaths, const 
         if((int)handles.size() > (int)reports.size()) unmapped += (int)handles.size() - (int)reports.size();
     }
     root["processes"]=arr;
-    root["aggregate"]=nlohmann::json{{"total_devices",totalDevices},{"unique_drivers",(int)uniqDrivers.size()},{"clean",clean},{"warn",warn},{"suspicious",susp},{"unmapped_devices",unmapped}};
+    root["aggregate"]=nlohmann::json{{"total_devices",totalDevices},{"unique_drivers",(int)uniqDrivers.size()},{"clean",clean},{"warn",warn},{"suspicious",susp},{"unmapped",unmapped},{"unmapped_devices",unmapped}};
     std::string s=root.dump(2); fwrite(s.c_str(),1,s.size(),out); fputc('\n',out);
     return susp?2:(warn?1:0);
 }

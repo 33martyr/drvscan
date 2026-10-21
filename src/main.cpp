@@ -205,39 +205,78 @@ int main(int argc, char* argv[]) {
                 continue;
             }
             auto handles = std::get<std::vector<DeviceHandle>>(handlesOrErr);
-            // Map each device to driver file, then to DriverInfo if possible; fallback DriverInfo for unknown
+            // Map each device to driver file, then to DriverInfo if possible; classify Unmapped vs on-disk vs memory
+            auto IsFilePresent = [](const std::string& w32Path) -> bool {
+                std::wstring w = ToWidePath(w32Path);
+                DWORD attr = GetFileAttributesW(w.c_str());
+                return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+            };
             std::vector<std::pair<DeviceHandle, DriverInfo>> mapped;
             std::vector<DeviceHandle> orderedHandles;
             std::vector<DriverReport> pidReports;
+            int pidUnmapped = 0; (void)pidUnmapped;
             for(auto& h: handles){
                 std::string drvFile = ResolveDeviceToDriver(h.device_path);
                 if(drvFile.empty()){
+                    // Unmapped: device not in device_map.json — cannot audit, not a warn
                     DriverInfo di; di.fileName="<unknown>"; di.normalizedPath=""; di.kernelPath=h.device_path;
                     di.baseAddress=nullptr; di.baseHex="-"; di.kernelImageSize=0;
-                    Evidence ne; ne.check="device_map"; ne.verdict=Verdict::Warn; ne.confidence=Confidence::Low;
-                    ne.provenance="data/device_map.json (60% coverage on stock Windows)";
-                    ne.detail="Device " + h.device_path + " has no mapped driver in device_map.json — cannot audit without file path (skipped)";
-                    ne.recommendation="Unmapped devices report as <unknown> and are not silently dropped — see LIMITATIONS.md";
+                    di.source = DriverSource::OnDisk;
+                    Evidence ne; ne.check="device_map"; ne.verdict=Verdict::Unmapped; ne.confidence=Confidence::Low;
+                    ne.provenance="data/device_map.json";
+                    ne.detail="device not in device_map — cannot audit '" + h.device_path + "' without a driver file mapping";
+                    ne.recommendation="Unmapped — add mapping to data/device_map.json if this device is driver-backed, or ignore if non-driver device";
                     std::vector<Evidence> nev{ne};
                     DriverReport nr = risk::MakeReport(di, std::move(nev));
                     nr.driver.fileName = "<unknown>";
+                    nr.overall = Verdict::Unmapped;
+                    nr.overallConfidence = Confidence::Low;
+                    nr.summary = ne.detail;
                     pidReports.push_back(std::move(nr));
                     orderedHandles.push_back(h);
                     continue;
                 }
                 auto it = driverByFile.find(toLower2(drvFile));
-                if(it!=driverByFile.end()) mapped.push_back({h, it->second});
-                else {
-                    DriverInfo di; di.fileName=drvFile; di.kernelPath=h.device_path;
-                    di.normalizedPath = "C:\\Windows\\System32\\drivers\\" + drvFile;
-                    mapped.push_back({h, di});
+                if(it!=driverByFile.end()) {
+                    // Loaded driver: full in-memory checks
+                    mapped.push_back({h, it->second});
+                } else {
+                    // Mapped but not in PsLoadedModuleList — on-disk if file exists, otherwise Unmapped
+                    std::string w32 = "C:\\Windows\\System32\\drivers\\" + drvFile;
+                    // Also try SystemRoot expansion for correctness on non-C installs
+                    bool present = IsFilePresent(w32);
+                    if(!present){
+                        DriverInfo di; di.fileName=drvFile; di.kernelPath=h.device_path;
+                        di.normalizedPath=w32; di.baseAddress=nullptr; di.baseHex="-"; di.kernelImageSize=0;
+                        di.source = DriverSource::OnDisk;
+                        Evidence ne; ne.check="device_map"; ne.verdict=Verdict::Unmapped; ne.confidence=Confidence::Low;
+                        ne.provenance="device_map + PsLoadedModuleList + filesystem";
+                        ne.detail="mapped driver not in loaded module list — file not found on disk '" + w32 + "' — cannot audit " + h.device_path;
+                        ne.recommendation="No on-disk file to audit; device handle does not prove loaded driver";
+                        std::vector<Evidence> nev{ne};
+                        DriverReport nr = risk::MakeReport(di, std::move(nev));
+                        nr.overall = Verdict::Unmapped;
+                        nr.overallConfidence = Confidence::Low;
+                        nr.summary = ne.detail;
+                        pidReports.push_back(std::move(nr));
+                        orderedHandles.push_back(h);
+                    } else {
+                        DriverInfo di; di.fileName=drvFile; di.kernelPath=h.device_path;
+                        di.normalizedPath=w32; di.baseAddress=nullptr; di.baseHex="-"; di.kernelImageSize=0;
+                        di.source = DriverSource::OnDisk;
+                        mapped.push_back({h, di});
+                    }
                 }
             }
-            // pidReports/orderedHandles already seeded for unmapped; mapped reports follow
+            // pidReports already contains Unmapped entries; now run the engine on mapped handles
             for(auto& pr2: mapped){
                 DeviceHandle dh2 = pr2.first;
                 DriverInfo d = pr2.second;
                 orderedHandles.push_back(dh2);
+                // Fix 3: --pid on-disk source — Base empty + Size 0 + file exists => on-disk; file missing would already be Unmapped above
+                if(d.baseAddress == nullptr && d.kernelImageSize == 0 && d.source != DriverSource::Orphaned){
+                    d.source = DriverSource::OnDisk;
+                }
                 // Reuse engine: run checks on d (same as default mode per-driver loop)
                 std::vector<Evidence> ev;
                 std::wstring wpath = ToWidePath(d.normalizedPath.empty()? d.kernelPath : d.normalizedPath);
@@ -268,11 +307,12 @@ int main(int argc, char* argv[]) {
                   if(pr.verdict==PathVerdict::Regular) e.verdict=Verdict::Clean; else if(pr.verdict==PathVerdict::Warn) e.verdict=Verdict::Warn; else e.verdict=Verdict::Suspicious; ev.push_back(std::move(e)); }
                 // Image size
                 { Evidence e; e.check="image_size"; e.provenance="On-disk PE SizeOfImage vs kernel-reported ImageSize (not live memory)";
-                  if(d.kernelImageSize==0) e.detail="Kernel ImageSize unavailable";
+                  if(d.kernelImageSize==0){ if(d.source==DriverSource::OnDisk) e.detail="ImageSize not available (on-disk audit — no loaded image to compare)"; else e.detail="Kernel ImageSize unavailable"; }
                   else if(!haveValidPe) e.detail="Cannot read on-disk PE SizeOfImage: "+readErr;
                   else if(pe.size_of_image!=d.kernelImageSize) e.detail="Mismatch: kernel ImageSize="+std::to_string(d.kernelImageSize)+" vs SizeOfImage="+std::to_string(pe.size_of_image);
                   else e.detail="SizeOfImage matches kernel ImageSize ("+std::to_string(pe.size_of_image)+")";
-                  if(d.kernelImageSize!=0 && haveValidPe && pe.size_of_image!=d.kernelImageSize) e.verdict=Verdict::Suspicious; else if(!haveValidPe) e.verdict=Verdict::Warn; 
+                  if(d.source==DriverSource::OnDisk && d.kernelImageSize==0) { e.verdict=Verdict::Clean; /* no kernel image to compare */ }
+                  else if(d.kernelImageSize!=0 && haveValidPe && pe.size_of_image!=d.kernelImageSize) e.verdict=Verdict::Suspicious; else if(!haveValidPe) e.verdict=Verdict::Warn; 
                   ev.push_back(std::move(e)); }
                 // PE C1-C7 (abbreviated: reuse same FIX-correct functions)
                 if(!haveBytes){ /* skip */ } else if(!haveValidPe){ Evidence e; e.check="pe_parse"; e.verdict=Verdict::Suspicious; e.detail="Malformed PE"; ev.push_back(std::move(e)); }
@@ -303,20 +343,29 @@ int main(int argc, char* argv[]) {
                 auto& label=std::get<0>(t); auto pid=std::get<1>(t); auto& handles=std::get<2>(t); auto& reports=std::get<3>(t);
                 PrintPidTable(stdout, label, pid, handles, reports, verbose);
             }
-            // Aggregate summary
+            // Aggregate summary — Unmapped is its own bucket, never counted as clean/warn/susp
             int totalDevices=0, unique=0, clean=0,warn=0,susp=0, unmapped2=0;
             std::unordered_map<std::string,int> uniq2;
             for(auto& t2: perPid){ auto& hh2=std::get<2>(t2); auto& rr2=std::get<3>(t2); totalDevices+=(int)hh2.size();
-                for(auto& rr: rr2){ uniq2[rr.driver.fileName]++; if(rr.overall==Verdict::Clean) clean++; else if(rr.overall==Verdict::Warn) warn++; else susp++; }
-                if((int)hh2.size() > (int)rr2.size()) unmapped2 += (int)hh2.size() - (int)rr2.size(); }
+                for(auto& rr: rr2){
+                    if(rr.overall==Verdict::Unmapped) { unmapped2++; continue; }
+                    uniq2[rr.driver.fileName]++; if(rr.overall==Verdict::Clean) clean++; else if(rr.overall==Verdict::Warn) warn++; else susp++;
+                }
+                // Also count unique drivers that are only Unmapped under a separate key so unique counts auditables
+                for(auto& rr: rr2) if(rr.overall==Verdict::Unmapped) uniq2[rr.driver.fileName + "#unmapped"]++;
+            }
             unique=(int)uniq2.size();
+            // Recompute unique auditables without the #unmapped hack — track separately
+            {
+                std::unordered_map<std::string,int> uniqAudit;
+                for(auto& t2: perPid) for(auto& rr: std::get<3>(t2)) if(rr.overall!=Verdict::Unmapped) uniqAudit[rr.driver.fileName]++;
+                unique=(int)uniqAudit.size();
+            }
             if(perPid.size()==1){
-                fprintf(stdout, "%d devices -> %d unique drivers -> %d clean · %d warn · %d suspicious\n", totalDevices, unique, clean,warn,susp);
-                if(unmapped2) fprintf(stdout, "%d devices unmapped (see LIMITATIONS.md for coverage)\n", unmapped2);
+                fprintf(stdout, "%d devices -> %d unique drivers -> %d clean · %d warn · %d suspicious · %d unmapped\n", totalDevices, unique, clean,warn,susp, unmapped2);
             } else {
                 fprintf(stdout, "%s x %zu processes\n", pidArg.c_str(), perPid.size());
-                fprintf(stdout, "%zu processes -> %d devices -> %d unique drivers -> %d clean · %d warn · %d suspicious\n", perPid.size(), totalDevices, unique, clean,warn,susp);
-                if(unmapped2) fprintf(stdout, "%d devices unmapped (see LIMITATIONS.md for coverage)\n", unmapped2);
+                fprintf(stdout, "%zu processes -> %d devices -> %d unique drivers -> %d clean · %d warn · %d suspicious · %d unmapped\n", perPid.size(), totalDevices, unique, clean,warn,susp, unmapped2);
             }
             fprintf(stdout, "Note: handles do not prove intent — a process opening \\Device\\Capcom proves handle, not malice.\n");
         }
@@ -840,15 +889,9 @@ int main(int argc, char* argv[]) {
             fprintf(stdout, "Section 1 — Context\n");
             std::string hdr = SigContextHeader(sig);
             fprintf(stdout, "%s", hdr.c_str());
-            fprintf(stdout, "\nSection 2 — Manual-mapped driver candidates\n");
-            if(orphaned.empty()){
-                fprintf(stdout, "  No orphaned driver objects — no candidates above Low confidence.\n");
-            } else {
-                fprintf(stdout, "  Orphaned driver objects (%zu) — also listed in the driver table with Source=orphaned:\n", orphaned.size());
-                for(auto& n: orphaned) fprintf(stdout, "    \\Driver\\%s  [orphaned object only — Low confidence]\n", n.c_str());
-                fprintf(stdout, "  Confidence: Low — orphaned object alone is not proof of manual mapping.\n");
-                fprintf(stdout, "  Tip: cross-ref with handles (S2), Amcache (S5), prefetch (S6) for corroboration.\n");
-            }
+            // Honesty: Section 2 must not claim "no candidates" when \Driver\ was never scanned
+            std::string s2 = BuildSection2Text(obj);
+            fprintf(stdout, "\n%s", s2.c_str());
             fprintf(stdout, "\nSection 3 — Surface coverage\n");
             fprintf(stdout, "  Object manager:  %d driver objects, %d device objects%s\n", obj.driverObjects, obj.deviceObjects, obj.error.empty()?"":(" ("+obj.error+")").c_str());
             if(!orphaned.empty()) fprintf(stdout, "    orphaned: %zu\n", orphaned.size());
@@ -877,13 +920,8 @@ int main(int argc, char* argv[]) {
     }
 
     if(!jsonOut){
-        fprintf(stdout, "\nSection 4 — What this scan did NOT cover\n");
-        fprintf(stdout, "  Manual-mapped drivers that registered no objects, left no Amcache/prefetch entry,\n");
-        fprintf(stdout, "  and were loaded after the last code-integrity event are pure-payload kernel patches.\n");
-        fprintf(stdout, "  Detecting them requires kernel memory reads, which user mode cannot do.\n");
-        fprintf(stdout, "  On HVCI:ON this class is blocked for unsigned code (barring HVCI bypass).\n");
-        fprintf(stdout, "  On HVCI:OFF this class is possible and this tool will not detect it.\n");
-        fprintf(stdout, "  No candidates found = no visible candidates, not proof nothing happened.\n");
+        std::string s4 = BuildSection4Text();
+        fprintf(stdout, "\n%s", s4.c_str());
     }
 
     Verdict ov = OverallVerdict(reports);

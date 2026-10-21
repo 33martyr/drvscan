@@ -29,6 +29,7 @@
     "Cimfs": { "driver": "cimfs.sys", "source": "WinObj: \\Driver\\Cimfs" },
     "Wcifs": { "driver": "wcifs.sys", "source": "WinObj: \\Driver\\Wcifs" },
     "CNG": { "driver": "cng.sys", "source": "WinObj: \\Driver\\CNG" },
+    "MMCSS": { "driver": "mmcss.sys", "source": "Windows Internals 7th ed. ch. 8" },
     "DeviceApi": { "driver": "umpass.sys", "source": "WinObj: \\Device\\DeviceApi (UMPass driver)" },
     "WMIDataDevice": { "driver": "wmilib.sys", "source": "WinObj: \\Device\\WMIDataDevice" }
   },

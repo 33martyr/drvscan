@@ -12,6 +12,13 @@ namespace risk {
 // - Else Clean.
 
 RiskDecision Assess(const std::vector<Evidence>& ev) {
+    // Unmapped evidence is handled by callers: callers set DriverReport::overall = Unmapped
+    // directly and do not route those reports through Assess. If Unmapped does reach
+    // Assess (e.g. synthetic tests), treat it as "cannot audit" -> return Unmapped.
+    for (auto& e : ev) if (e.verdict == Verdict::Unmapped) {
+        RiskDecision dd; dd.verdict = Verdict::Unmapped; dd.confidence = Confidence::Low;
+        dd.summary = e.detail; dd.nextStep = e.recommendation; return dd;
+    }
     RiskDecision d;
     if (ev.empty()) {
         d.verdict = Verdict::Clean;

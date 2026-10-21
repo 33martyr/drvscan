@@ -5,7 +5,7 @@
 
 namespace drvscan {
 
-enum class Verdict { Clean = 0, Warn = 1, Suspicious = 2 };
+enum class Verdict { Clean = 0, Warn = 1, Suspicious = 2, Unmapped = 3 };
 enum class Confidence { High = 0, Medium = 1, Low = 2 };
 enum class SigStatus { Valid, Unsigned, Modified, Revoked, Expired, UntrustedRoot, Unverifiable };
 enum class PathVerdict { Regular, Warn, Suspicious };
@@ -15,6 +15,7 @@ inline const char* ToString(Verdict v) {
         case Verdict::Clean: return "clean";
         case Verdict::Warn: return "warn";
         case Verdict::Suspicious: return "suspicious";
+        case Verdict::Unmapped: return "unmapped";
     }
     return "unknown";
 }
@@ -42,11 +43,12 @@ inline Verdict MaxVerdict(Verdict a, Verdict b) {
     return (static_cast<int>(a) > static_cast<int>(b)) ? a : b;
 }
 
-enum class DriverSource { InMemory, Orphaned };
+enum class DriverSource { InMemory, OnDisk, Orphaned };
 
 inline const char* ToString(DriverSource s) {
     switch (s) {
         case DriverSource::InMemory: return "memory";
+        case DriverSource::OnDisk: return "on-disk";
         case DriverSource::Orphaned: return "orphaned";
     }
     return "unknown";
