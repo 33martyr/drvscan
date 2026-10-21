@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(drvscan VERSION 0.2.0 LANGUAGES CXX)
+project(drvscan VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # DRVSCAN_VERSION for code (also from project VERSION)
-add_compile_definitions(DRVSCAN_VERSION="0.2.0" DRVSCAN_BLOCKLIST_SCHEMA="0.2.0")
+add_compile_definitions(DRVSCAN_VERSION="0.4.0" DRVSCAN_BLOCKLIST_SCHEMA="0.2.0")
 
 if(MSVC)
   add_compile_options(/W4 /permissive- /utf-8)
@@ -71,9 +71,17 @@ add_library(drvscan_lib STATIC
   src/devmap.cpp
   src/objscan.cpp
   src/sigcontext.cpp
+  src/handletable.cpp
+  src/eventlog.cpp
+  src/etw.cpp
+  src/amcache.cpp
+  src/prefetch.cpp
+  src/defender.cpp
+  src/bootlog.cpp
+  src/correlate.cpp
 )
 target_include_directories(drvscan_lib PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/vendor)
-target_link_libraries(drvscan_lib PUBLIC psapi bcrypt wintrust crypt32 shlwapi winhttp version)
+target_link_libraries(drvscan_lib PUBLIC psapi bcrypt wintrust crypt32 shlwapi winhttp version wevtapi tdh wbemuuid)
 
 # Single TU that provides doctest main
 add_library(doctest_main STATIC tests/doctest_main.cpp)

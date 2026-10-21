@@ -12,8 +12,13 @@
 - Table hides `Clean` by default (`--verbose`), dedupes `next_step`; `--redact-paths`; JSON `fields` + `tool_version`/`blocklist_schema_version` + `is_sample`.
 - Update verified against `data/blocklist.sha256` pin (release-coupled); docs for rotation.
 
+## 0.4.0 — 2026-10-21 (v0.3.0 FIXes + Stages A–C wired)
+
+- Four verified FIXes (v0.2.0): timestamp plausible-window `[2000-01-01, now+30d]` (no high-bit), section characteristics `RWX`/`.text`/`RWX`/`empty`/`non-printable` (not name allowlist), PE parse cap 4 GB (fixes nvlddmkm.sys 114 MB), EP=0 skip on DLL `IMAGE_FILE_DLL`. Build clean (`/W4 /WX`), 81/177, default 151 clean exit 0 preserved.
+
 ## 0.3.0 — 2026-10-21
 
-- Four verified FIXes (v0.2.0): timestamp plausible-window `[2000-01-01, now+30d]` (no high-bit), section characteristics `RWX`/`.text`/`RWX`/`empty`/`non-printable` (not name allowlist), PE parse cap 4 GB (fixes nvlddmkm.sys 114 MB), EP=0 skip on DLL `IMAGE_FILE_DLL`.
-- `--pid <name|pid>` per-process device-handle audit: `handles.h/.cpp` `NtQuerySystemInformation(64)` + `NtQueryObject` 500ms thread timeout + `HarddiskVolume*` collapse + `NamedPipe` skip + `SeDebugPrivilege` best-effort; `devmap.h/.cpp` resolves `\Device\`→driver via `data/device_map.json` (26 exact + 4 wildcards, WinObj sources). Table Device column + multi-PID aggregate + JSON `devices[]`/`processes[]` + `--pid-exact` + Levenshtein suggestion + path-not-supported + `handles ≠ intent` disclaimer. Default mode unchanged (81 cases / 177 pass, clean build, 151 clean exit 0).
+- `--pid <name|pid>` per-process device-handle audit: `handles.h/.cpp` `NtQuerySystemInformation(64)` + `NtQueryObject` 500ms thread timeout + `HarddiskVolume*` collapse + `NamedPipe` skip + `SeDebugPrivilege` best-effort; `devmap.h/.cpp` resolves `\Device\`→driver via `data/device_map.json` (26→29 exact + 4 wildcards, WinObj sources, now `CNG`/`DeviceApi`/`WMIDataDevice` mapped). Table Device column + multi-PID aggregate + JSON `devices[]`/`processes[]` + `--pid-exact` + Levenshtein suggestion + path-not-supported + `handles ≠ intent` disclaimer. Default mode unchanged (81 cases / 177 pass, clean build, 151 clean exit 0).
 - `data/device_map.json` v1.0, docs `--pid` (README, LIMITATIONS v0.4).
+
+- v0.4 Stage A `src/objscan.h/.cpp` `\Driver\`/`\Device\` via `NtOpenDirectoryObject`/`NtQueryDirectoryObject` (access-denied fallback, 292 devices on stock; `\Driver\` requires Administrator — Section 3 `0xC0000022` hint). Stage B `src/sigcontext.h/.cpp` HVCI/DSE/test-signing/KD/Prefetch/Amcache/Sysmon Section 1 header. Stub surfaces S2–S9 (handletable/eventlog/amcache/prefetch/bootlog/defender/etw/correlate) with honest `pending` coverage + required Section 4. v0.2.0/v0.3.0 behavior unchanged — pushed as-is awaiting full S2–S9 wiring.

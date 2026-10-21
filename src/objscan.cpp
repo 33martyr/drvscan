@@ -11,11 +11,7 @@ typedef NTSTATUS(NTAPI* PFN_NtOpenDirectoryObject)(PHANDLE, ACCESS_MASK, POBJECT
 typedef NTSTATUS(NTAPI* PFN_NtQueryDirectoryObject)(HANDLE, PVOID, ULONG, ULONG, ULONG, PULONG, PULONG);
 typedef NTSTATUS(NTAPI* PFN_NtClose)(HANDLE);
 
-static void InitUnicodeString(UNICODE_STRING* u, const std::wstring& s){
-    u->Length = (USHORT)(s.size()*2);
-    u->MaximumLength = (USHORT)((s.size()+1)*2);
-    u->Buffer = (PWSTR)s.c_str();
-}
+
 
 std::vector<std::string> EnumerateObjectDirectory(const std::wstring& path, std::string& outErr){
     outErr.clear();
@@ -27,11 +23,21 @@ std::vector<std::string> EnumerateObjectDirectory(const std::wstring& path, std:
     auto pQuery=(PFN_NtQueryDirectoryObject)GetProcAddress(ntdll,"NtQueryDirectoryObject");
     auto pClose=(PFN_NtClose)GetProcAddress(ntdll,"NtClose");
     if(!pOpen||!pQuery){ outErr="NtOpen/QueryDirectoryObject not found (requires Windows 10+)"; return names; }
-    UNICODE_STRING uname; InitUnicodeString(&uname, path);
+    static WCHAR pathBuf[512]; // keep alive across NtOpen call
+    wcsncpy_s(pathBuf, path.c_str(), 511);
+    UNICODE_STRING uname{}; uname.Length=(USHORT)(wcslen(pathBuf)*2); uname.MaximumLength=sizeof(pathBuf); uname.Buffer=pathBuf;
     OBJECT_ATTRIBUTES oa{}; oa.Length=sizeof(oa); oa.ObjectName=&uname;
     HANDLE hDir=nullptr;
-    NTSTATUS st=pOpen(&hDir, 0x0001 /*DIRECTORY_QUERY*/, &oa);
-    if(st!=0){ outErr="NtOpenDirectoryObject "+std::to_string((uint32_t)st); return names; }
+     NTSTATUS st=pOpen(&hDir, 0x0001 /*DIRECTORY_QUERY*/, &oa);
+     if(st!=0 && (uint32_t)st==0xC0000022u /*STATUS_ACCESS_DENIED*/){
+         NTSTATUS st2=pOpen(&hDir, 0x0000, &oa);
+         if(st2==0) st=st2;
+     }
+     if(st!=0){
+         char hex[16]={0}; sprintf_s(hex,sizeof(hex),"%08X",(uint32_t)st);
+         outErr=std::string("NtOpenDirectoryObject 0x")+hex+" (run as Administrator for \\Driver\\)";
+         return names;
+     }
     ULONG ctx=0; ULONG retLen=0;
     std::vector<uint8_t> buf(64*1024);
     bool first=true;
@@ -43,7 +49,6 @@ std::vector<std::string> EnumerateObjectDirectory(const std::wstring& path, std:
             break;
         }
         struct OBJECT_DIRECTORY_INFORMATION { UNICODE_STRING Name; UNICODE_STRING TypeName; };
-        auto* info=(OBJECT_DIRECTORY_INFORMATION*)buf.data();
         // Walk entries until null name
         size_t offset=0;
         while(true){
@@ -114,11 +119,8 @@ ObjScanResult ScanObjectManager(){
     }
     r.driverObjects = (int)r.driverNames.size();
     r.deviceObjects = (int)r.deviceNames.size();
-    // Orphan detection placeholder: cross-ref against allDrivers would need EnumerateDrivers.
-    // Do lightweight orphan heuristic: drivers whose name doesn't match any loaded module base name (synthetic).
-    // Real orphan check is done in caller that has allDrivers; here just report enumeration counts.
-    // For now, orphaned = drivers not in a small known-good set? No — leave empty and let caller compute.
-    // But to pass the Stage A expectation (3-15 orphans on stock), we enumerate and report.
+    // Orphaned = driver objects with no loaded-module filename match (caller also cross-refs, but we seed here)
+    // Leave orphaned empty; main.cpp cross-refs against EnumDeviceDrivers set for the real orphan list.
     return r;
 }
 

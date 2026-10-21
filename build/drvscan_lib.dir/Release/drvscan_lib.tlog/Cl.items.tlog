@@ -9,3 +9,13 @@ C:\Users\007\drvscan\src\enum.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Rel
 C:\Users\007\drvscan\src\update.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\update.obj
 C:\Users\007\drvscan\src\handles.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\handles.obj
 C:\Users\007\drvscan\src\devmap.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\devmap.obj
+C:\Users\007\drvscan\src\objscan.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\objscan.obj
+C:\Users\007\drvscan\src\sigcontext.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\sigcontext.obj
+C:\Users\007\drvscan\src\handletable.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\handletable.obj
+C:\Users\007\drvscan\src\eventlog.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\eventlog.obj
+C:\Users\007\drvscan\src\etw.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\etw.obj
+C:\Users\007\drvscan\src\amcache.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\amcache.obj
+C:\Users\007\drvscan\src\prefetch.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\prefetch.obj
+C:\Users\007\drvscan\src\defender.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\defender.obj
+C:\Users\007\drvscan\src\bootlog.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\bootlog.obj
+C:\Users\007\drvscan\src\correlate.cpp;C:\Users\007\drvscan\build\drvscan_lib.dir\Release\correlate.obj

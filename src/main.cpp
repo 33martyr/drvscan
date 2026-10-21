@@ -10,6 +10,8 @@
 #include "update.h"
 #include "handles.h"
 #include "devmap.h"
+#include "objscan.h"
+#include "sigcontext.h"
 #include <windows.h>
 #include <iostream>
 #include <string>
@@ -68,7 +70,7 @@ static std::wstring ResolveBlocklistPath(const std::wstring& overridePath) {
 }
 
 static void PrintHelp() {
-    printf("drvscan 0.2.0 — enumerate loaded kernel drivers and flag suspicious ones\n");
+    printf("drvscan 0.4.0 — enumerate loaded kernel drivers and flag suspicious ones\n");
     printf("\nUsage: drvscan [options]\n");
     printf("  --json                    Emit JSON report to stdout\n");
     printf("  --verbose                 Show all evidence in table (default hides Clean)\n");
@@ -80,7 +82,7 @@ static void PrintHelp() {
     printf("  --strict                  Promote Warn to exit 2 (for CI strict mode)\n");
     printf("  --legacy-exit-codes       Warn->1, Suspicious->2 (compat for v1.1.1 CI)\n");
     printf("  --help                    Show this help\n");
-    printf("  --version                 Show version (tool 0.2.0, schema 0.2.0, snapshot 2026.10.20)\n");
+    printf("  --version                 Show version (tool 0.4.0, schema 0.2.0, snapshot 2026.10.20)\n");
     printf("\nExit codes (default): 0 clean, 1 warn, 2 suspicious, 3 scan failed\n");
     printf("  --strict: 0 clean, 2 warn|suspect, 3 failed\n");
     printf("  --legacy-exit-codes: 0 clean, 1 warn, 2 suspicious, 3 failed (v1.1.1 compat)\n");
@@ -129,7 +131,7 @@ int main(int argc, char* argv[]) {
         else if (a == "--legacy-exit-codes") legacyExitCodes = true;
         else if (a == "--help" || a == "-h") { PrintHelp(); return 0; }
         else if (a == "--version") {
-            printf("drvscan 0.2.0 (blocklist schema 0.2.0, blocklist snapshot 2026.10.20)\n");
+            printf("drvscan 0.4.0 (blocklist schema 0.2.0, blocklist snapshot 2026.10.20)\n");
             return 0;
         }
         else if (a == "--pid" || a == "--pid-exact") { }
@@ -181,7 +183,6 @@ int main(int argc, char* argv[]) {
             fprintf(stderr,"error: %zu matches for '%s'; pass --pid <numeric> to disambiguate\n", pids.size(), pidArg.c_str());
             return 3;
         }
-        // Load blocklist
         std::wstring blPath2 = ResolveBlocklistPath(blocklistOverride);
         std::string blErr2; Blocklist bl2 = Blocklist::Load(blPath2, blErr2);
         bool blOk = blErr2.empty();
@@ -296,30 +297,34 @@ int main(int argc, char* argv[]) {
         }
         // Output
         if(jsonOut){
-            WritePidJson(stdout, &bl2, redactPaths, "0.2.0", "0.2.0", perPid, pidArg);
+            WritePidJson(stdout, &bl2, redactPaths, "0.4.0", "0.2.0", perPid, pidArg);
         } else {
             for(auto& t: perPid){
                 auto& label=std::get<0>(t); auto pid=std::get<1>(t); auto& handles=std::get<2>(t); auto& reports=std::get<3>(t);
                 PrintPidTable(stdout, label, pid, handles, reports, verbose);
             }
             // Aggregate summary
-            int totalDevices=0, unique=0, clean=0,warn=0,susp=0, unmapped=0;
-            std::unordered_map<std::string,int> uniq;
-            for(auto& t: perPid){ auto& handles=std::get<2>(t); auto& reports=std::get<3>(t); totalDevices+=(int)handles.size();
-                for(auto& r: reports){ uniq[r.driver.fileName]++; if(r.overall==Verdict::Clean) clean++; else if(r.overall==Verdict::Warn) warn++; else susp++; }
-                if((int)handles.size() > (int)reports.size()) unmapped += (int)handles.size() - (int)reports.size(); }
-            unique=(int)uniq.size();
+            int totalDevices=0, unique=0, clean=0,warn=0,susp=0, unmapped2=0;
+            std::unordered_map<std::string,int> uniq2;
+            for(auto& t2: perPid){ auto& hh2=std::get<2>(t2); auto& rr2=std::get<3>(t2); totalDevices+=(int)hh2.size();
+                for(auto& rr: rr2){ uniq2[rr.driver.fileName]++; if(rr.overall==Verdict::Clean) clean++; else if(rr.overall==Verdict::Warn) warn++; else susp++; }
+                if((int)hh2.size() > (int)rr2.size()) unmapped2 += (int)hh2.size() - (int)rr2.size(); }
+            unique=(int)uniq2.size();
             if(perPid.size()==1){
                 fprintf(stdout, "%d devices -> %d unique drivers -> %d clean · %d warn · %d suspicious\n", totalDevices, unique, clean,warn,susp);
-                if(unmapped) fprintf(stdout, "%d devices unmapped (see LIMITATIONS.md for coverage)\n", unmapped);
+                if(unmapped2) fprintf(stdout, "%d devices unmapped (see LIMITATIONS.md for coverage)\n", unmapped2);
             } else {
                 fprintf(stdout, "%s x %zu processes\n", pidArg.c_str(), perPid.size());
                 fprintf(stdout, "%zu processes -> %d devices -> %d unique drivers -> %d clean · %d warn · %d suspicious\n", perPid.size(), totalDevices, unique, clean,warn,susp);
-                if(unmapped) fprintf(stdout, "%d devices unmapped (see LIMITATIONS.md for coverage)\n", unmapped);
+                if(unmapped2) fprintf(stdout, "%d devices unmapped (see LIMITATIONS.md for coverage)\n", unmapped2);
             }
             fprintf(stdout, "Note: handles do not prove intent — a process opening \\Device\\Capcom proves handle, not malice.\n");
         }
-        if(legacyExitCodes) return (maxExit==2?2:(maxExit==1?1:0));
+        if(legacyExitCodes){
+            if(maxExit==2) return 2;
+            if(maxExit==1) return 1;
+            return 0;
+        }
         if(strictMode){ if(maxExit==1||maxExit==2) return 2; return 0; }
         return maxExit;
     }
@@ -784,15 +789,75 @@ int main(int argc, char* argv[]) {
         reports.push_back(std::move(report));
     }
 
+    // v0.4 Sections 1-4: context (S10), candidates (S1 orphaned), surface coverage, not-covered.
+    // In default mode sections print to stdout before the driver table; in --json they go into JSON.
+    // Keep existing driver reports for the table/JSON below; sections are additive.
+    ObjScanResult obj{}; SigContext sig{};
+    {
+        obj = ScanObjectManager();
+        sig = QuerySigContext();
+        // Cross-ref orphaned: driver objects with no loaded-module filename match
+        // ScanObjectManager leaves orphaned empty; compute here against drivers.
+        std::vector<std::string> loadedLower;
+        for(auto& d: drivers) loadedLower.push_back(ToLowerStrMain(d.fileName));
+        std::vector<std::string> orphaned;
+        for(auto& dn: obj.driverNames){
+            std::string dl = ToLowerStrMain(dn);
+            // Match: driver object name often equals service name, which is filename minus .sys
+            bool found=false;
+            for(auto& ll: loadedLower){
+                std::string base = ll; size_t dot=base.rfind('.'); if(dot!=std::string::npos) base=base.substr(0,dot);
+                if(ll==dl || base==dl || ll.find(dl)!=std::string::npos) found=true;
+            }
+            if(!found) orphaned.push_back(dn);
+        }
+        obj.orphaned = orphaned;
+        if(!jsonOut){
+            fprintf(stdout, "Section 1 — Context\n");
+            std::string hdr = SigContextHeader(sig);
+            fprintf(stdout, "%s", hdr.c_str());
+            fprintf(stdout, "\nSection 2 — Manual-mapped driver candidates\n");
+            if(orphaned.empty()){
+                fprintf(stdout, "  No orphaned driver objects — no candidates above Low confidence.\n");
+            } else {
+                fprintf(stdout, "  Orphaned driver objects (%zu):\n", orphaned.size());
+                for(auto& n: orphaned) fprintf(stdout, "    \\Driver\\%s  [orphaned object only — Low confidence]\n", n.c_str());
+                fprintf(stdout, "  Confidence: Low — orphaned object alone is not proof of manual mapping.\n");
+                fprintf(stdout, "  Tip: cross-ref with handles (S2), Amcache (S5), prefetch (S6) for corroboration.\n");
+            }
+            fprintf(stdout, "\nSection 3 — Surface coverage\n");
+            fprintf(stdout, "  Object manager:  %d driver objects, %d device objects%s\n", obj.driverObjects, obj.deviceObjects, obj.error.empty()?"":(" ("+obj.error+")").c_str());
+            if(!orphaned.empty()) fprintf(stdout, "    orphaned: %zu\n", orphaned.size());
+            fprintf(stdout, "  Global handles:  (S2 handletable — pending)\n");
+            fprintf(stdout, "  Code Integrity:  (S3 wevtapi — pending)\n");
+            fprintf(stdout, "  Amcache:         (S5 — pending)\n");
+            fprintf(stdout, "  Prefetch:        (S6 — pending)\n");
+            fprintf(stdout, "  Sysmon:          %s\n", sig.sysmonInstalled?"installed — pending":"not installed");
+            fprintf(stdout, "  Boot log:        (S9 — pending)\n");
+            fprintf(stdout, "  Defender:        (S8 — pending)\n");
+        }
+    }
+
     std::stable_sort(reports.begin(), reports.end(), [](const DriverReport& a, const DriverReport& b){
         if (a.overall != b.overall) return (int)a.overall > (int)b.overall;
         return a.driver.fileName < b.driver.fileName;
     });
 
+    if(!jsonOut) fprintf(stdout, "\n=== Driver audit (existing checks) ===\n");
     if (jsonOut) {
-        PrintJson(reports, &bl, stdout, redactPaths, "0.2.0", "0.2.0");
+        PrintJson(reports, &bl, stdout, redactPaths, "0.4.0", "0.2.0");
     } else {
         PrintTable(reports, stdout, verbose);
+    }
+
+    if(!jsonOut){
+        fprintf(stdout, "\nSection 4 — What this scan did NOT cover\n");
+        fprintf(stdout, "  Manual-mapped drivers that registered no objects, left no Amcache/prefetch entry,\n");
+        fprintf(stdout, "  and were loaded after the last code-integrity event are pure-payload kernel patches.\n");
+        fprintf(stdout, "  Detecting them requires kernel memory reads, which user mode cannot do.\n");
+        fprintf(stdout, "  On HVCI:ON this class is blocked for unsigned code (barring HVCI bypass).\n");
+        fprintf(stdout, "  On HVCI:OFF this class is possible and this tool will not detect it.\n");
+        fprintf(stdout, "  No candidates found = no visible candidates, not proof nothing happened.\n");
     }
 
     Verdict ov = OverallVerdict(reports);
@@ -805,7 +870,6 @@ int main(int argc, char* argv[]) {
         if (ov == Verdict::Suspicious || ov == Verdict::Warn) return 2;
         return 0;
     }
-    // Default: 0 clean, 1 warn, 2 suspicious, 3 scan-failed (above)
     if (ov == Verdict::Suspicious) return 2;
     if (ov == Verdict::Warn) return 1;
     return 0;

@@ -35,3 +35,9 @@
 16. **Per-process device coverage is ~30 entries.** `data/device_map.json` v1.0 maps ~30 WinObj-confirmed `\Device\` names (60% of typical handle count). Unmapped devices report as `<unknown>` / `<unmapped>` (visible, not dropped). `handles ≠ intent` — opening `\Device\Capcom` proves handle, not malice. `NtQueryObject` can hang on named pipes with no reader; v0.3 skips `\Device\NamedPipe\*` and uses a 500ms thread timeout (detached thread leak documented in code; `SeDebugPrivilege` is best-effort).
 
 17. **--pid full paths not supported; window-title not supported; --include-named-pipes is v0.4.** `--pid "C:\...\chrome.exe"` is rejected. No behavioral or timing analysis.
+
+18. **\Driver\ enumeration requires Administrator.** `NtOpenDirectoryObject(\Driver\)` needs `DIRECTORY_QUERY`; without elevation, Section 3 shows `Driver dir: 0xC0000022 (run as Administrator)` and orphaned candidates are not computed. `\Device\` still enumerates; install via `cmake --install` and run elevated for full coverage.
+
+19. **v0.4 surfaces S2–S9 are staged — pending surfaces report as `(pending)` in Section 3.** Global handles, Code Integrity, Amcache, prefetch, ETW, Sysmon, boot log, Defender are honest stubs until wired to `correlate` confidence.
+
+20. **Section 4 (what wasn't covered) is required.** Every run prints Section 4 — pure-payload kernel patches without objects/Amcache/prefetch/CI are not detectable from user mode. HVCI:ON blocks unsigned code; HVCI:OFF the gap is real. `No candidates found = no visible candidates, not proof nothing happened.`
