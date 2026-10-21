@@ -30,7 +30,10 @@ void TryEnableDebugPrivilege();
 // NtQuerySystemInformation(64) filtered to pid's \Device\ / \FileSystem\ handles.
 // Dedupe by device_path (keep first access_mask), collapse HarddiskVolume*,
 // skip \Device\NamedPipe\*.
-// Handles ERROR_MORE_DATA by retrying larger buffer, NtQueryObject hang via detached thread+500ms timeout.
+// Handles ERROR_MORE_DATA by retrying larger buffer. Avoids NtQueryObject hangs
+// by pre-filtering handles: GetFileType==PIPE is skipped before any NtQueryObject,
+// and ObjectTypeInformation is queried to allow only "File" objects — other types
+// (Event/Mutant/etc.) are skipped without ever calling ObjectNameInformation.
 std::variant<std::vector<DeviceHandle>, HandleError> EnumerateDeviceHandles(DWORD pid);
 
 // For tests: inject handle array and run the filter/dedup/collapse logic directly

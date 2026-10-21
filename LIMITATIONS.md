@@ -32,7 +32,7 @@
 
 15. **Triage, not detection guarantee.** Does not replace EDR, AV, or memory forensics. Use as the first 5-second question: "where do I look next?"
 
-16. **Per-process device coverage is ~30 entries.** `data/device_map.json` v1.0 maps ~30 WinObj-confirmed `\Device\` names (60% of typical handle count). Unmapped devices report as `<unknown>` / `<unmapped>` (visible, not dropped). `handles ≠ intent` — opening `\Device\Capcom` proves handle, not malice. `NtQueryObject` can hang on named pipes with no reader; v0.3 skips `\Device\NamedPipe\*` and uses a 500ms thread timeout (detached thread leak documented in code; `SeDebugPrivilege` is best-effort).
+16. **Per-process device coverage is ~30 entries.** `data/device_map.json` v1.0 maps ~30 WinObj-confirmed `\Device\` names (60% of typical handle count). Unmapped devices report as `<unknown>` / `<unmapped>` (visible, not dropped). `handles ≠ intent` — opening `\Device\Capcom` proves handle, not malice. `NtQueryObject(ObjectNameInformation)` can hang on (1) named pipes with no reader, (2) certain sync primitives, and (3) some driver device objects during unload — `TerminateThread` on a thread inside `NtQueryObject` is undefined and ineffective. The fix avoids the hang without threads: `GetFileType==PIPE` is skipped before any `NtQueryObject`, and `ObjectTypeInformation` is queried to allow only `File` objects — non-File types are skipped without ever calling `ObjectNameInformation`. `\Device\NamedPipe\*` filtering is retained as defense-in-depth.
 
 17. **--pid full paths not supported; window-title not supported; --include-named-pipes is v0.4.** `--pid "C:\...\chrome.exe"` is rejected. No behavioral or timing analysis.
 

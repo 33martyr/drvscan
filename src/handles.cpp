@@ -5,9 +5,6 @@
 #include <cctype>
 #include <vector>
 #include <string>
-#include <thread>
-#include <future>
-#include <chrono>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -90,6 +87,7 @@ typedef NTSTATUS(WINAPI* PFN_NtQSI)(ULONG,PVOID,ULONG,PULONG);
 typedef NTSTATUS(WINAPI* PFN_NtQO)(HANDLE,ULONG,PVOID,ULONG,PULONG);
 #define SystemExtendedHandleInformation 64
 #define ObjectNameInformation 1
+#define ObjectTypeInformation 2
 
 struct UNICODE_STRING2 { USHORT Length; USHORT MaximumLength; PWSTR Buffer; };
 
@@ -157,45 +155,83 @@ std::variant<std::vector<DeviceHandle>, HandleError> EnumerateDeviceHandles(DWOR
         if(!DuplicateHandle(hProc, (HANDLE)(ULONG_PTR)e.HandleValue, GetCurrentProcess(), &dup, 0, FALSE, DUPLICATE_SAME_ACCESS)){
             continue;
         }
-        HANDLE dupCopy = dup;
-        PFN_NtQO pQO2 = pNtQO;
-        auto queryName = [dupCopy, pQO2]()->std::string{
-            ULONG qSize=2048;
-            for(int attempt=0; attempt<3; ++attempt){
-                std::vector<uint8_t> qbuf(qSize);
-                ULONG qLen=0;
-                NTSTATUS qst=pQO2(dupCopy, ObjectNameInformation, qbuf.data(), qSize, &qLen);
-                if(qst==0){
-                    auto* uni=(UNICODE_STRING2*)qbuf.data();
-                    if(uni->Length>0 && uni->Buffer){
-                        int n=WideCharToMultiByte(CP_UTF8,0,uni->Buffer, uni->Length/2, nullptr,0,nullptr,nullptr);
-                        std::string s(n,0); WideCharToMultiByte(CP_UTF8,0,uni->Buffer, uni->Length/2, s.data(),n,nullptr,nullptr);
-                        return s;
-                    }
-                    return {};
-                }
-                if((uint32_t)qst==0xC0000023u || (uint32_t)qst==0x80000005u){
-                    qSize = qLen+512; if(qSize>4096) qSize=4096; continue;
-                }
-                break;
-            }
-            return {};
-        };
-        std::future<std::string> fut = std::async(std::launch::async, queryName);
-        std::string devPath;
-        if(fut.wait_for(std::chrono::milliseconds(500))==std::future_status::ready){
-            devPath=fut.get();
-        } else {
+        // 1) Avoid blocking on named pipes with no reader: GetFileType is a fast
+        //    user-mode check that returns FILE_TYPE_PIPE without issuing an
+        //    NtQueryObject(ObjectNameInformation) that would block in kernel.
+        //    Chrome opens dozens of such pipes for IPC.
+        DWORD ft = GetFileType(dup);
+        if(ft == FILE_TYPE_PIPE){
             CloseHandle(dup);
             continue;
         }
+        // 2) Query ObjectTypeInformation (safe, does not block on drivers).
+        //    Only "File" objects can own \Device\ / \FileSystem\ names. Skip
+        //    Events/Mutants/Semaphores/Keys/etc. without ever calling
+        //    ObjectNameInformation on them — those were the hang source #2.
+        bool isFileObject = false;
+        {
+            std::vector<uint8_t> tbuf(1024);
+            ULONG tLen = 0;
+            NTSTATUS tst = pNtQO(dup, ObjectTypeInformation, tbuf.data(), (ULONG)tbuf.size(), &tLen);
+            if((uint32_t)tst == 0xC0000023u || (uint32_t)tst == 0x80000005u){
+                // STATUS_BUFFER_OVERFLOW / STATUS_BUFFER_TOO_SMALL — retry with required size
+                tbuf.resize(tLen + 64);
+                tst = pNtQO(dup, ObjectTypeInformation, tbuf.data(), (ULONG)tbuf.size(), &tLen);
+            }
+            if(tst == 0){
+                auto* typeStr = reinterpret_cast<UNICODE_STRING2*>(tbuf.data());
+                if(typeStr->Length > 0 && typeStr->Buffer){
+                    std::wstring w(typeStr->Buffer, typeStr->Length / 2);
+                    if(_wcsicmp(w.c_str(), L"File") == 0) isFileObject = true;
+                }
+            } else {
+                // Can't determine type — skip rather than risk hanging Name query (covers #3).
+                CloseHandle(dup);
+                continue;
+            }
+        }
+        if(!isFileObject){
+            CloseHandle(dup);
+            continue;
+        }
+        // 3) Synchronous, bounded ObjectNameInformation query — no thread/timeout/
+        //    TerminateThread. The two filters above have removed the 3 hang
+        //    classes, so this call is now safe to issue directly.
+        std::string devPath;
+        {
+            ULONG qSize = 2048;
+            for(int attempt = 0; attempt < 3; ++attempt){
+                std::vector<uint8_t> qbuf(qSize);
+                ULONG qLen = 0;
+                NTSTATUS qst = pNtQO(dup, ObjectNameInformation, qbuf.data(), qSize, &qLen);
+                if(qst == 0){
+                    auto* uni = reinterpret_cast<UNICODE_STRING2*>(qbuf.data());
+                    if(uni->Length > 0 && uni->Buffer){
+                        int n = WideCharToMultiByte(CP_UTF8, 0, uni->Buffer, uni->Length / 2, nullptr, 0, nullptr, nullptr);
+                        std::string s(n, 0);
+                        WideCharToMultiByte(CP_UTF8, 0, uni->Buffer, uni->Length / 2, s.data(), n, nullptr, nullptr);
+                        devPath = std::move(s);
+                    }
+                    break;
+                }
+                if((uint32_t)qst == 0xC0000023u || (uint32_t)qst == 0x80000005u){
+                    qSize = qLen + 512;
+                    if(qSize > 8192) qSize = 8192;
+                    continue;
+                }
+                break;
+            }
+        }
         CloseHandle(dup);
         if(devPath.empty()) continue;
-        std::string low=ToLowerStr(devPath);
-        bool isDevice = (low.rfind("\\device\\",0)==0);
-        bool isFs = (low.rfind("\\filesystem\\",0)==0);
+        std::string low = ToLowerStr(devPath);
+        bool isDevice = (low.rfind("\\device\\", 0) == 0);
+        bool isFs = (low.rfind("\\filesystem\\", 0) == 0);
         if(!isDevice && !isFs) continue;
-        DeviceHandle dh; dh.handle_value=(uint32_t)(ULONG_PTR)e.HandleValue; dh.access_mask=e.GrantedAccess; dh.device_path=devPath;
+        DeviceHandle dh;
+        dh.handle_value = (uint32_t)(ULONG_PTR)e.HandleValue;
+        dh.access_mask = e.GrantedAccess;
+        dh.device_path = devPath;
         raw.push_back(std::move(dh));
     }
     CloseHandle(hProc);

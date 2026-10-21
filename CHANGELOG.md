@@ -12,6 +12,10 @@
 - Table hides `Clean` by default (`--verbose`), dedupes `next_step`; `--redact-paths`; JSON `fields` + `tool_version`/`blocklist_schema_version` + `is_sample`.
 - Update verified against `data/blocklist.sha256` pin (release-coupled); docs for rotation.
 
+## 0.4.0 — 2026-10-21 (v0.3.0 FIXes + Stages A–C wired, pid-hang fix)
+
+- `drvscan --pid` hang fixed: `NtQueryObject(ObjectNameInformation)` blocks on named pipes with no reader / some sync objects / driver unload windows; the 500ms `TerminateThread` timeout is undefined on kernel-bound threads and ineffective (Chrome: dozens of such pipes → indefinite hang). Fix removes the thread/timeout and pre-filters instead — `GetFileType==PIPE` is skipped before any `NtQueryObject`, and `ObjectTypeInformation` gates `ObjectNameInformation` to `File` objects only. Sync, bounded `ObjectNameInformation` on the remainder; no `std::future`/`TerminateThread`.
+
 ## 0.4.0 — 2026-10-21 (v0.3.0 FIXes + Stages A–C wired)
 
 - Four verified FIXes (v0.2.0): timestamp plausible-window `[2000-01-01, now+30d]` (no high-bit), section characteristics `RWX`/`.text`/`RWX`/`empty`/`non-printable` (not name allowlist), PE parse cap 4 GB (fixes nvlddmkm.sys 114 MB), EP=0 skip on DLL `IMAGE_FILE_DLL`. Build clean (`/W4 /WX`), 81/177, default 151 clean exit 0 preserved.
