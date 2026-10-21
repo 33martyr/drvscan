@@ -42,6 +42,16 @@ inline Verdict MaxVerdict(Verdict a, Verdict b) {
     return (static_cast<int>(a) > static_cast<int>(b)) ? a : b;
 }
 
+enum class DriverSource { InMemory, Orphaned };
+
+inline const char* ToString(DriverSource s) {
+    switch (s) {
+        case DriverSource::InMemory: return "memory";
+        case DriverSource::Orphaned: return "orphaned";
+    }
+    return "unknown";
+}
+
 struct DriverInfo {
     void* baseAddress = nullptr;
     uint32_t kernelImageSize = 0;
@@ -49,6 +59,7 @@ struct DriverInfo {
     std::string normalizedPath;  // Win32 normalized path (C:\...)
     std::string fileName;        // basename
     std::string baseHex;         // hex string of baseAddress for display
+    DriverSource source = DriverSource::InMemory; // provenance: memory (PsLoadedModuleList) vs orphaned object (possible manual map)
 };
 
 // Evidence produced by a single collector; provenance + recommendation included.

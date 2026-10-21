@@ -812,6 +812,30 @@ int main(int argc, char* argv[]) {
             if(!found) orphaned.push_back(dn);
         }
         obj.orphaned = orphaned;
+        // Promote orphaned objects into the main driver table as Source=orphaned rows
+        // so the table itself distinguishes in-memory (PsLoadedModuleList) vs
+        // manual-map candidates (\Driver\ without a loaded module).
+        for(auto& n : orphaned){
+            DriverInfo di;
+            di.fileName = n;
+            di.kernelPath = "\\Driver\\" + n;
+            di.normalizedPath = "";
+            di.baseHex = "-";
+            di.baseAddress = nullptr;
+            di.kernelImageSize = 0;
+            di.source = DriverSource::Orphaned;
+            Evidence ev;
+            ev.check = "driver_object";
+            ev.verdict = Verdict::Warn;
+            ev.confidence = Confidence::Low;
+            ev.detail = "Orphaned \\Driver\\" + n + " with no PsLoadedModuleList entry — possible manual-mapped driver or stale object (Low confidence; not proof of manual mapping)";
+            ev.provenance = "Object Manager (NtOpenDirectoryObject \\Driver\\) vs PsLoadedModuleList (EnumDeviceDrivers/NtQuerySystemInformation)";
+            ev.recommendation = "Cross-ref with handles (--pid), Amcache, prefetch; if no other surface corroborates, likely stale/legacy object";
+            std::vector<Evidence> evs{ev};
+            auto rep = risk::MakeReport(di, std::move(evs));
+            rep.overallConfidence = Confidence::Low; // keep Low for orphaned-only signal
+            reports.push_back(std::move(rep));
+        }
         if(!jsonOut){
             fprintf(stdout, "Section 1 — Context\n");
             std::string hdr = SigContextHeader(sig);
@@ -820,7 +844,7 @@ int main(int argc, char* argv[]) {
             if(orphaned.empty()){
                 fprintf(stdout, "  No orphaned driver objects — no candidates above Low confidence.\n");
             } else {
-                fprintf(stdout, "  Orphaned driver objects (%zu):\n", orphaned.size());
+                fprintf(stdout, "  Orphaned driver objects (%zu) — also listed in the driver table with Source=orphaned:\n", orphaned.size());
                 for(auto& n: orphaned) fprintf(stdout, "    \\Driver\\%s  [orphaned object only — Low confidence]\n", n.c_str());
                 fprintf(stdout, "  Confidence: Low — orphaned object alone is not proof of manual mapping.\n");
                 fprintf(stdout, "  Tip: cross-ref with handles (S2), Amcache (S5), prefetch (S6) for corroboration.\n");
@@ -839,11 +863,13 @@ int main(int argc, char* argv[]) {
     }
 
     std::stable_sort(reports.begin(), reports.end(), [](const DriverReport& a, const DriverReport& b){
+        // Keep orphaned rows grouped after in-memory ones when verdict equal — then by name
         if (a.overall != b.overall) return (int)a.overall > (int)b.overall;
+        if (a.driver.source != b.driver.source) return (int)a.driver.source < (int)b.driver.source;
         return a.driver.fileName < b.driver.fileName;
     });
 
-    if(!jsonOut) fprintf(stdout, "\n=== Driver audit (existing checks) ===\n");
+    if(!jsonOut) fprintf(stdout, "\n=== Driver audit (driver table — Source=memory is PsLoadedModuleList, Source=orphaned is \\Driver\\ without a loaded module) ===\n");
     if (jsonOut) {
         PrintJson(reports, &bl, stdout, redactPaths, "0.4.0", "0.2.0");
     } else {

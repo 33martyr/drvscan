@@ -31,9 +31,13 @@ static std::string RedactUsername(const std::string& path, bool doRedact) {
     return path.substr(0, start) + "<user>" + path.substr(end);
 }
 
+static const char* SourceLabel(DriverSource s) {
+    return s == DriverSource::Orphaned ? "orphaned" : "memory";
+}
+
 void PrintTable(const std::vector<DriverReport>& reports, FILE* out, bool verbose) {
-    fprintf(out, "%-18s %-8s %-11s %-8s %-30s %s\n", "Base", "Size", "Verdict", "Conf", "File", "Evidence");
-    fprintf(out, "%-18s %-8s %-11s %-8s %-30s %s\n", "------------------", "--------", "-----------", "--------", "------------------------------", "--------");
+    fprintf(out, "%-18s %-8s %-11s %-8s %-9s %-30s %s\n", "Base", "Size", "Verdict", "Conf", "Source", "File", "Evidence");
+    fprintf(out, "%-18s %-8s %-11s %-8s %-9s %-30s %s\n", "------------------", "--------", "-----------", "--------", "---------", "------------------------------", "--------");
     for (auto& r : reports) {
         std::string evStr;
         if (r.evidence.empty()) {
@@ -52,11 +56,12 @@ void PrintTable(const std::vector<DriverReport>& reports, FILE* out, bool verbos
         }
         std::string fn = r.driver.fileName;
         if (fn.size() > 30) fn = fn.substr(0, 27) + "...";
-        fprintf(out, "%-18s %-8u %-11s %-8s %-30s %s\n",
+        fprintf(out, "%-18s %-8u %-11s %-8s %-9s %-30s %s\n",
                 r.driver.baseHex.c_str(),
                 r.driver.kernelImageSize,
                 ToString(r.overall),
                 ToString(r.overallConfidence),
+                SourceLabel(r.driver.source),
                 fn.c_str(),
                 evStr.c_str());
         if (!r.summary.empty() && r.overall != Verdict::Clean) {
@@ -64,14 +69,18 @@ void PrintTable(const std::vector<DriverReport>& reports, FILE* out, bool verbos
             if (!r.nextStep.empty()) fprintf(out, "     next: %s\n", r.nextStep.c_str());
         }
     }
-    int clean = 0, warn = 0, susp = 0;
+    int clean = 0, warn = 0, susp = 0, cntOrphaned = 0, cntMemory = 0;
     for (auto& r : reports) {
         if (r.overall == Verdict::Clean) ++clean;
         else if (r.overall == Verdict::Warn) ++warn;
         else ++susp;
+        if (r.driver.source == DriverSource::Orphaned) ++cntOrphaned;
+        else ++cntMemory;
     }
-    fprintf(out, "\n%d drivers: %d clean, %d warn, %d suspicious\n", (int)reports.size(), clean, warn, susp);
+    fprintf(out, "\n%d drivers (%d memory, %d orphaned): %d clean, %d warn, %d suspicious\n",
+            (int)reports.size(), cntMemory, cntOrphaned, clean, warn, susp);
     if (susp > 0) fprintf(out, "Note: 'suspicious' is not 'malicious' — see LIMITATIONS.md and per-finding confidence.\n");
+    if (cntOrphaned > 0) fprintf(out, "Note: Source=orphaned means a \\Driver\\ object with no PsLoadedModuleList entry (possible manual map / legacy object).\n");
 }
 
 void PrintTable(const std::vector<DriverReport>& reports, FILE* out) {
@@ -122,6 +131,7 @@ void PrintJson(const std::vector<DriverReport>& reports, const Blocklist* blockl
         o["kernelPath"] = redactPaths ? RedactUsername(r.driver.kernelPath, true) : r.driver.kernelPath;
         o["normalizedPath"] = redactPaths ? RedactUsername(r.driver.normalizedPath, true) : r.driver.normalizedPath;
         o["fileName"] = r.driver.fileName;
+        o["source"] = SourceLabel(r.driver.source);
         o["verdict"] = ToString(r.overall);
         o["confidence"] = ToString(r.overallConfidence);
         o["summary"] = r.summary;
@@ -158,8 +168,8 @@ void PrintJson(const std::vector<DriverReport>& reports, const Blocklist* blockl
 void PrintPidTable(FILE* out, const std::string& procLabel, DWORD pid, const std::vector<DeviceHandle>& handles, const std::vector<DriverReport>& reports, bool verbose) {
     fprintf(out, "=== %s (pid %u) ===\n", procLabel.c_str(), (unsigned)pid);
     if (handles.empty()) { fprintf(out, "(no device handles)\n\n"); return; }
-    fprintf(out, "%-27s %-18s %-8s %-11s %-8s %s\n", "Device", "Base", "Size", "Verdict", "Conf", "File");
-    fprintf(out, "%-27s %-18s %-8s %-11s %-8s %s\n", "---------------------------", "------------------", "--------", "-----------", "--------", "----------------");
+    fprintf(out, "%-27s %-18s %-8s %-11s %-8s %-9s %s\n", "Device", "Base", "Size", "Verdict", "Conf", "Source", "File");
+    fprintf(out, "%-27s %-18s %-8s %-11s %-8s %-9s %s\n", "---------------------------", "------------------", "--------", "-----------", "--------", "---------", "----------------");
     for (size_t i=0;i<reports.size();++i){
         const auto& r = reports[i];
         std::string dev = (i<handles.size()) ? handles[i].device_path : "";
@@ -168,13 +178,13 @@ void PrintPidTable(FILE* out, const std::string& procLabel, DWORD pid, const std
         std::string ev;
         if(r.evidence.empty()) ev="-";
         else { bool first=true; for(auto& e:r.evidence){ if(!verbose && e.verdict==Verdict::Clean) continue; if(!first) ev+=" | "; first=false; ev+=e.check+":"+ToString(e.verdict)+"("+e.detail+")"; } if(ev.empty()) ev="(clean)"; }
-        fprintf(out, "%-27s %-18s %-8u %-11s %-8s %s\n", dev.c_str(), r.driver.baseHex.c_str(), r.driver.kernelImageSize, ToString(r.overall), ToString(r.overallConfidence), fn.c_str());
+        fprintf(out, "%-27s %-18s %-8u %-11s %-8s %-9s %s\n", dev.c_str(), r.driver.baseHex.c_str(), r.driver.kernelImageSize, ToString(r.overall), ToString(r.overallConfidence), SourceLabel(r.driver.source), fn.c_str());
         if(!ev.empty() && ev!="(clean)") fprintf(out, "  %s\n", ev.c_str());
         if(!r.nextStep.empty() && r.overall!=Verdict::Clean) fprintf(out, "  next: %s\n", r.nextStep.c_str());
     }
     if(reports.size() < handles.size()){
         for(size_t i=reports.size(); i<handles.size(); ++i){
-            fprintf(out, "%-27s %-18s %-8s %-11s %-8s %s\n", handles[i].device_path.c_str(), "-", "-", "unknown", "-", "<unmapped>");
+            fprintf(out, "%-27s %-18s %-8s %-11s %-8s %-9s %s\n", handles[i].device_path.c_str(), "-", "-", "unknown", "-", "-", "<unmapped>");
         }
     }
     fprintf(out, "\n");
@@ -200,7 +210,7 @@ int WritePidJson(FILE* out, const Blocklist* blocklist, bool redactPaths, const 
         for(const auto& r: reports){
             nlohmann::json o; o["base"]=r.driver.baseHex; o["imageSize"]=r.driver.kernelImageSize;
             o["kernelPath"]=redactPaths?RedactUsername(r.driver.kernelPath,true):r.driver.kernelPath;
-            o["fileName"]=r.driver.fileName; o["verdict"]=ToString(r.overall); o["confidence"]=ToString(r.overallConfidence);
+            o["fileName"]=r.driver.fileName; o["source"]=SourceLabel(r.driver.source); o["verdict"]=ToString(r.overall); o["confidence"]=ToString(r.overallConfidence);
             o["summary"]=r.summary; o["next_step"]=r.nextStep;
             nlohmann::json chs=nlohmann::json::array();
             for(const auto& e:r.evidence){ nlohmann::json c; c["check"]=e.check; c["verdict"]=ToString(e.verdict); c["confidence"]=ToString(e.confidence);
