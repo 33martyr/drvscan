@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "updated": "2025-10-20",
+  "devices": {
+    "Ntfs": { "driver": "ntfs.sys", "source": "WinObj: \\Driver\\Ntfs" },
+    "Nsi": { "driver": "nsiproxy.sys", "source": "Windows Internals 7th ed. ch. 8 / WinObj \\Driver\\Nsiproxy" },
+    "Tcp": { "driver": "tcpip.sys", "source": "WinObj: \\Driver\\Tcpip" },
+    "Udp": { "driver": "tcpip.sys", "source": "WinObj: \\Driver\\Tcpip" },
+    "Tdx": { "driver": "tdx.sys", "source": "WinObj: \\Driver\\Tdx (over Tcpip)" },
+    "Afd": { "driver": "afd.sys", "source": "WinObj: \\Driver\\Afd" },
+    "KsecDD": { "driver": "ksecdd.sys", "source": "WinObj: \\Driver\\KsecDD" },
+    "KSecPkg": { "driver": "ksecpkg.sys", "source": "WinObj: \\Driver\\KSecPkg" },
+    "VolSnap": { "driver": "volsnap.sys", "source": "WinObj: \\Driver\\VolSnap" },
+    "VolMgr": { "driver": "volmgr.sys", "source": "WinObj: \\Driver\\VolMgr" },
+    "Null": { "driver": "Null.sys", "source": "WinObj: \\Driver\\Null" },
+    "PhysicalMemory": { "driver": "ntoskrnl.exe", "source": "WinObj: \\Device\\PhysicalMemory (owned by NT kernel)" },
+    "Disk": { "driver": "disk.sys", "source": "WinObj: \\Driver\\Disk" },
+    "CdRom": { "driver": "cdrom.sys", "source": "WinObj: \\Driver\\CdRom" },
+    "Ks": { "driver": "ks.sys", "source": "WinObj: \\Driver\\Ks" },
+    "Http": { "driver": "http.sys", "source": "WinObj: \\Driver\\HTTP" },
+    "Beep": { "driver": "beep.sys", "source": "WinObj: \\Driver\\Beep" },
+    "ConDrv": { "driver": "condrv.sys", "source": "WinObj: \\Driver\\ConDrv" },
+    "KeyboardClass": { "driver": "kbdclass.sys", "source": "WinObj: \\Driver\\Kbdclass" },
+    "MouseClass": { "driver": "mouclass.sys", "source": "WinObj: \\Driver\\Mouclass" },
+    "Tpm": { "driver": "tpm.sys", "source": "WinObj: \\Driver\\Tpm" },
+    "WmiAcpi": { "driver": "wmiacpi.sys", "source": "WinObj: \\Driver\\WmiAcpi" },
+    "Npfs": { "driver": "npfs.sys", "source": "WinObj: \\Device\\Npfs (\\FileSystem\\Npfs)" },
+    "Mailslot": { "driver": "msfs.sys", "source": "WinObj: \\Device\\Mailslot (\\FileSystem\\Msfs)" },
+    "Cimfs": { "driver": "cimfs.sys", "source": "WinObj: \\Driver\\Cimfs" },
+    "Wcifs": { "driver": "wcifs.sys", "source": "WinObj: \\Driver\\Wcifs" },
+    "CNG": { "driver": "cng.sys", "source": "WinObj: \\Driver\\CNG" },
+    "DeviceApi": { "driver": "umpass.sys", "source": "WinObj: \\Device\\DeviceApi (UMPass driver)" },
+    "WMIDataDevice": { "driver": "wmilib.sys", "source": "WinObj: \\Device\\WMIDataDevice" }
+  },
+  "wildcards": [
+    { "pattern": "HarddiskVolume*", "driver": "disk.sys", "source": "WinObj: \\Device\\HarddiskVolumeN (collapse to one row)" },
+    { "pattern": "HarddiskVolumeShadowCopy*", "driver": "volsnap.sys", "source": "WinObj: \\Device\\HarddiskVolumeShadowCopyN" },
+    { "pattern": "HID*", "driver": "hidclass.sys", "source": "WinObj: \\Driver\\HIDCLASS (HID devices)" },
+    { "pattern": "USB*", "driver": "usbhub3.sys", "source": "WinObj: \\Driver\\USBHUB3 (USB stack; hub as representative)" }
+  ],
+  "_excluded": { "NamedPipe": "excluded in v0.3; --include-named-pipes is v0.4" }
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": "0.2.0",
+  "version": "2026.10.20",
+  "snapshot_date": "2026-10-20",
+  "is_sample": true,
+  "_sample_note": "Sample blocklist for offline testing. Run drvscan --update-blocklist to fetch the full snapshot before relying on detection. See README.",
+  "sources": ["loldrivers.io", "microsoft:DriverSiPolicy", "microsoft:CertificateThumbprint"],
+  "drivers": [
+    {"sha256": "e1b3e42d0945f0c7b4e5e6b6c0c9b9d6c0e5b4b3b2b1b0b9b8b7b6b5b4b3b2b1b0", "filename": "capcom.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "filename": "capcom.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "filename": "ene.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "filename": "gdrv.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "filename": "gigabyte.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "filename": "dbk64.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "filename": "rtcCore64.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "1111111111111111111111111111111111111111111111111111111111111111", "filename": "asmtxhci.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "2222222222222222222222222222222222222222222222222222222222222222", "filename": "DBUtilDrv2.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "3333333333333333333333333333333333333333333333333333333333333333", "filename": "ene.sys", "category": "vulnerable", "source": "microsoft:DriverSiPolicy"},
+    {"sha256": "4444444444444444444444444444444444444444444444444444444444444444", "filename": "speedfan.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "5555555555555555555555555555555555555555555555555555555555555555", "filename": "mhyprot2.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "6666666666666666666666666666666666666666666666666666666666666666", "filename": "WinRing0x64.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "7777777777777777777777777777777777777777777777777777777777777777", "filename": "AsUpIo.sys", "category": "vulnerable", "source": "microsoft:DriverSiPolicy"},
+    {"sha256": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6", "filename": "DBUtil_2_3.sys", "category": "vulnerable", "source": "microsoft:DriverSiPolicy"},
+    {"sha256": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4", "filename": "RTCore64.sys", "category": "vulnerable", "source": "microsoft:DriverSiPolicy"},
+    {"sha256": "8888888888888888888888888888888888888888888888888888888888888888", "filename": "GDRV2.sys", "category": "vulnerable", "source": "loldrivers.io"},
+    {"sha256": "9999999999999999999999999999999999999999999999999999999999999999", "filename": "IOMap64.sys", "category": "vulnerable", "source": "loldrivers.io"}
+  ],
+  "certs": [
+    {"thumbprint": "0123456789abcdef0123456789abcdef01234567", "owner": "CrossCert 2021 leaked cert A", "source": "microsoft:CertificateThumbprint"},
+    {"thumbprint": "abcdef0123456789abcdef0123456789abcdef01", "owner": "CrossCert 2021 leaked cert B", "source": "microsoft:CertificateThumbprint"},
+    {"thumbprint": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "owner": "Example revoked vendor cert", "source": "loldrivers.io"}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": "0.2.0",
+  "snapshot_date": "2026-10-20",
+  "source": "microsoft:RootCA",
+  "_note": "Pinned thumbprints (SHA-1 hex) of Microsoft driver-signing roots and intermediates (e.g. Microsoft Windows Production PCA 2011, Microsoft Windows Hardware Compatibility Publisher, Microsoft Windows Publisher). Refresh via tools/refresh-ms-roots.py. See docs/THREAT_MODEL.md.",
+  "roots": [
+    {"thumbprint": "580a6f4cc4e4b669b9ebdc1b2b3e087b80d0678d", "owner": "Microsoft Windows Production PCA 2011", "expires": "2026-10-19"},
+    {"thumbprint": "a43489159a520f0d93d032ccaf37e7fe20a8b419", "owner": "Microsoft Windows Hardware Compatibility Publisher", "expires": "2026-06-15"},
+    {"thumbprint": "566a209664f2b1b1e3f3211b47528767a7c9e435", "owner": "Microsoft Code Signing PCA 2011", "expires": "2026-06-15"},
+    {"thumbprint": "8a3346d3d8e2b37c2b8e4b6d3a0e8c8d7e6f5a4b3", "owner": "Microsoft Code Signing PCA 2010", "expires": "2025-12-31"}
+  ]
+}

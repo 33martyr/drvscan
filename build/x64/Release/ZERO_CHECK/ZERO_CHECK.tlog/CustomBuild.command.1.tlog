@@ -1,0 +1,10 @@
+^C:\USERS\007\DRVSCAN\BUILD\CMAKEFILES\BEBF96D1E375BEB8675C0C61D921B92D\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/007/drvscan -BC:/Users/007/drvscan/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/007/drvscan/build/drvscan.slnx
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

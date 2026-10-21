@@ -1,0 +1,11 @@
+C:\Users\007\drvscan\tests\test_hash.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_hash.obj
+C:\Users\007\drvscan\tests\test_pe.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_pe.obj
+C:\Users\007\drvscan\tests\test_pe_structure.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_pe_structure.obj
+C:\Users\007\drvscan\tests\test_path.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_path.obj
+C:\Users\007\drvscan\tests\test_json.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_json.obj
+C:\Users\007\drvscan\tests\test_blocklist.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_blocklist.obj
+C:\Users\007\drvscan\tests\test_risk.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_risk.obj
+C:\Users\007\drvscan\tests\test_verify.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_verify.obj
+C:\Users\007\drvscan\tests\test_handles.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_handles.obj
+C:\Users\007\drvscan\tests\test_devmap.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_devmap.obj
+C:\Users\007\drvscan\tests\test_integration.cpp;C:\Users\007\drvscan\build\drvscan_tests.dir\Release\test_integration.obj
